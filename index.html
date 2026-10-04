@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#020d1c">
+    <title>Global Command</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --cyan: #00e5ff; --cyan-dim: rgba(0,229,255,0.12);
+            --red: #ff2255;  --gold: #ffd700; --green: #2ecc71;
+            --bg: #020d1c;   --panel-bg: rgba(2,15,35,0.93);
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body, html { margin:0; padding:0; width:100%; height:100%; background:var(--bg); overflow:hidden; touch-action:manipulation; font-family:'Rajdhani',sans-serif; }
+        #game-container { position:absolute; inset:0; }
+
+        /* SCANLINES */
+        #scanlines { position:fixed; inset:0; pointer-events:none; z-index:100;
+            background: repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.15) 4px),
+                        radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,0.45) 100%); }
+
+        /* TOP BAR */
+        #top-bar { position:fixed; top:0; left:0; right:0; z-index:50; height:60px;
+            display:flex; align-items:center; justify-content:space-between; padding:0 20px;
+            background:linear-gradient(180deg,rgba(2,13,28,0.96) 0%,transparent 100%);
+            border-bottom:1px solid rgba(0,229,255,0.1); }
+        #title-block h1 { margin:0; font-family:'Orbitron',sans-serif; font-size:20px; color:var(--cyan);
+            letter-spacing:3px; text-shadow:0 0 20px var(--cyan); }
+        #title-block span { font-size:10px; color:#3a5a78; letter-spacing:2px; text-transform:uppercase; }
+
+        /* Faction counters */
+        #faction-bar { display:flex; gap:8px; align-items:center; }
+        .fc-badge { font-size:11px; padding:3px 8px; border-radius:10px; border:1px solid; font-weight:bold; letter-spacing:1px; }
+
+        /* Time controls */
+        #time-controls { display:flex; align-items:center; gap:6px; }
+        .time-btn { background:transparent; border:1px solid rgba(0,229,255,0.3); color:var(--cyan);
+            font-size:16px; width:38px; height:34px; cursor:pointer; border-radius:6px;
+            transition:all 0.2s; display:flex; align-items:center; justify-content:center; }
+        .time-btn:hover { background:var(--cyan-dim); border-color:var(--cyan); }
+        .time-btn.active { background:var(--cyan); color:#000; box-shadow:0 0 10px var(--cyan); }
+        #speed-label { font-size:12px; color:#3a5a78; margin-left:4px; min-width:70px; }
+
+        /* Gold */
+        #gold-block { display:flex; flex-direction:column; align-items:flex-end;
+            background:rgba(255,215,0,0.07); border:1px solid rgba(255,215,0,0.25); padding:5px 12px; border-radius:7px; }
+        #gold-value { font-family:'Orbitron',sans-serif; font-size:20px; color:var(--gold);
+            text-shadow:0 0 8px var(--gold); line-height:1; }
+        #gold-income { font-size:11px; }
+
+        /* PROVINCE PANEL */
+        #province-panel { position:fixed; top:66px; right:0; width:290px; z-index:40;
+            background:var(--panel-bg); border-left:1px solid rgba(0,229,255,0.2);
+            border-radius:12px 0 0 12px; box-shadow:-4px 0 25px rgba(0,229,255,0.08);
+            padding:16px; pointer-events:auto; display:none; color:white;
+            transform:translateX(100%); transition:transform 0.28s ease;
+            max-height:calc(100vh - 70px); overflow-y:auto; }
+        #province-panel.open { transform:translateX(0); display:block; }
+        #p-title { font-family:'Orbitron',sans-serif; font-size:15px; color:var(--cyan); margin:0 0 3px;
+            text-shadow:0 0 8px var(--cyan); padding-right:30px; }
+        #p-faction { font-size:13px; margin-bottom:10px; }
+        #p-type-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:12px;
+            font-weight:bold; letter-spacing:1px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); }
+
+        .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+        .stat-card { background:rgba(255,255,255,0.04); border-radius:7px; padding:8px 10px;
+            border:1px solid rgba(255,255,255,0.07); }
+        .stat-label { font-size:10px; color:#3a5a78; text-transform:uppercase; letter-spacing:1px; }
+        .stat-value { font-size:24px; font-weight:bold; line-height:1.1; }
+        .stat-value.troops { color:#ff6b6b; } .stat-value.pop { color:var(--green); }
+
+        #training-block { margin:8px 0; display:none; }
+        .prog-label { font-size:11px; color:var(--gold); margin-bottom:4px; }
+        .prog-bar-bg { height:6px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden; }
+        .prog-bar-fill { height:100%; background:linear-gradient(90deg,var(--gold),#ffa500); border-radius:3px; transition:width 0.4s; width:0%; }
+
+        .panel-divider { border:none; border-top:1px solid rgba(255,255,255,0.07); margin:12px 0; }
+        .btn { width:100%; padding:9px 10px; margin-top:6px; border-radius:6px; font-family:'Rajdhani',sans-serif;
+            font-size:14px; font-weight:bold; cursor:pointer; text-transform:uppercase; letter-spacing:1px;
+            transition:all 0.2s; border:1px solid; }
+        .btn-red { color:#ff6b6b; border-color:rgba(255,107,107,0.35); background:rgba(255,60,60,0.04); }
+        .btn-red:hover:not(:disabled) { background:#ff4c4c; color:#fff; box-shadow:0 0 12px #ff4c4c; }
+        .btn-gold { color:var(--gold); border-color:rgba(255,215,0,0.35); background:rgba(255,215,0,0.04); }
+        .btn-gold:hover:not(:disabled) { background:var(--gold); color:#000; box-shadow:0 0 12px var(--gold); }
+        .btn:disabled { background:rgba(255,255,255,0.02); color:#2a3a4a; border-color:rgba(255,255,255,0.06); cursor:not-allowed; }
+
+        .recruit-row { display:flex; gap:6px; margin-top:6px; }
+        #recruit-input { flex:1; background:rgba(255,107,107,0.07); color:#ff6b6b;
+            border:1px solid rgba(255,107,107,0.3); border-radius:6px; padding:8px;
+            font-family:'Rajdhani',sans-serif; font-size:18px; font-weight:bold; text-align:center; outline:none; }
+        .section-header { font-size:10px; color:#3a5a78; letter-spacing:2px; text-transform:uppercase;
+            margin:12px 0 6px; border-left:2px solid var(--cyan); padding-left:8px; }
+        #close-panel-btn { position:absolute; top:12px; right:12px; background:transparent;
+            border:1px solid rgba(255,255,255,0.12); color:#888; width:24px; height:24px;
+            border-radius:50%; cursor:pointer; font-size:13px; transition:0.2s; }
+        #close-panel-btn:hover { background:rgba(255,255,255,0.08); color:#fff; }
+
+        /* DISPATCH */
+        #dispatch-controls { position:fixed; bottom:24px; left:20px; z-index:40;
+            background:var(--panel-bg); border:1px solid rgba(0,229,255,0.2);
+            border-radius:10px; padding:12px 16px; pointer-events:auto;
+            box-shadow:0 0 16px rgba(0,229,255,0.08); display:flex; flex-direction:column; gap:8px; min-width:190px; }
+        #dispatch-label { font-size:10px; color:#3a5a78; letter-spacing:2px; text-transform:uppercase; }
+        #dispatch-row { display:flex; gap:8px; align-items:center; }
+        #dispatch-input { flex:1; background:var(--cyan-dim); color:var(--cyan); border:1px solid rgba(0,229,255,0.35);
+            border-radius:6px; padding:8px; font-family:'Orbitron',sans-serif; font-size:16px; text-align:center; outline:none; width:70px; }
+        #dispatch-all-btn { background:transparent; border:1px solid rgba(0,229,255,0.35); color:var(--cyan);
+            padding:8px 10px; border-radius:6px; font-family:'Rajdhani',sans-serif; font-weight:bold; font-size:13px;
+            cursor:pointer; transition:0.2s; white-space:nowrap; }
+        #dispatch-all-btn:hover, #dispatch-all-btn.active { background:var(--cyan); color:#000; }
+
+        /* MINIMAP */
+        #minimap-container { position:fixed; bottom:24px; right:20px; z-index:40;
+            background:var(--panel-bg); border:1px solid rgba(0,229,255,0.15);
+            border-radius:7px; overflow:hidden; padding:4px; box-shadow:0 0 12px rgba(0,229,255,0.06); }
+        #minimap-label { font-size:9px; color:#3a5a78; letter-spacing:2px; text-align:center; padding:2px 0; }
+
+        /* EVENT LOG */
+        #event-log { position:fixed; bottom:24px; left:230px; z-index:40;
+            width:260px; pointer-events:none; display:flex; flex-direction:column-reverse; gap:4px; }
+        .event-item { background:rgba(2,15,35,0.9); border-left:3px solid var(--cyan);
+            padding:5px 10px; border-radius:0 5px 5px 0; font-size:12px; color:#99bbcc;
+            animation:fadeIn 0.3s ease; backdrop-filter:blur(4px); }
+        .event-item.red { border-left-color:var(--red); }
+        .event-item.gold { border-left-color:var(--gold); color:var(--gold); }
+        @keyframes fadeIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+
+        /* OVERLAY */
+        #overlay-screen { position:fixed; inset:0; z-index:200; display:none;
+            background:rgba(0,0,0,0.72); backdrop-filter:blur(8px);
+            align-items:center; justify-content:center; }
+        #overlay-screen.show { display:flex; }
+        .overlay-box { background:var(--panel-bg); padding:45px 55px; border-radius:14px; text-align:center;
+            border:1px solid rgba(255,0,60,0.35); box-shadow:0 0 50px rgba(255,0,60,0.15); max-width:380px; }
+        .overlay-box.win { border-color:rgba(255,215,0,0.45); box-shadow:0 0 50px rgba(255,215,0,0.15); }
+        .overlay-title { font-family:'Orbitron',sans-serif; font-size:24px; color:var(--red); margin:0 0 10px; }
+        .overlay-box.win .overlay-title { color:var(--gold); }
+        .overlay-sub { color:#aaa; font-size:15px; margin-bottom:28px; }
+        .overlay-btn { background:transparent; border:1px solid #aaa; color:#fff;
+            padding:12px 28px; font-family:'Rajdhani',sans-serif; font-size:17px; font-weight:bold;
+            cursor:pointer; border-radius:7px; transition:0.2s; }
+        .overlay-btn:hover { background:#fff; color:#000; }
+
+        /* TOOLTIP */
+        #node-tooltip { position:fixed; z-index:60; pointer-events:none; display:none;
+            background:rgba(2,15,35,0.96); border:1px solid rgba(0,229,255,0.25);
+            border-radius:7px; padding:8px 12px; font-size:12px; color:#ccc;
+            box-shadow:0 4px 18px rgba(0,0,0,0.5); max-width:200px; }
+        #node-tooltip strong { color:var(--cyan); font-size:14px; display:block; }
+
+        /* Scrollbar */
+        #province-panel::-webkit-scrollbar { width:3px; }
+        #province-panel::-webkit-scrollbar-thumb { background:rgba(0,229,255,0.2); border-radius:2px; }
+
+        /* Touch-first map controls */
+        #map-controls { position:fixed; right:12px; top:50%; transform:translateY(-50%); z-index:35;
+            display:flex; flex-direction:column; gap:8px; }
+        .map-control-btn { width:46px; height:46px; border:1px solid rgba(0,229,255,.35); border-radius:14px;
+            color:var(--cyan); background:rgba(2,15,35,.88); font-size:23px; font-weight:bold;
+            box-shadow:0 4px 18px rgba(0,0,0,.28); touch-action:manipulation; }
+        #map-hint { position:fixed; top:72px; left:50%; transform:translateX(-50%); z-index:30;
+            max-width:calc(100vw - 32px); padding:7px 12px; border:1px solid rgba(0,229,255,.16);
+            border-radius:20px; background:rgba(2,15,35,.76); color:#9bb2c5; font-size:12px;
+            text-align:center; pointer-events:none; white-space:nowrap; transition:opacity .2s ease, visibility .2s ease; }
+        #map-hint.hidden { opacity:0; visibility:hidden; }
+        #game-container canvas { display:block; touch-action:none; }
+        button, input { -webkit-tap-highlight-color:transparent; }
+
+        @media (max-width: 700px) {
+            body, html { height:100%; height:100dvh; min-height:0; }
+            #top-bar { height:auto; min-height:100px; display:grid; grid-template-columns:minmax(0,1fr) auto;
+                grid-template-areas:"title gold" "time time"; gap:5px 8px; align-content:center;
+                padding:calc(env(safe-area-inset-top, 0px) + 7px) 12px 8px;
+                background:linear-gradient(180deg,rgba(2,13,28,.98),rgba(2,13,28,.88)); }
+            #title-block { grid-area:title; min-width:0; }
+            #title-block h1 { font-size:15px; letter-spacing:1.5px; }
+            #title-block span { display:block; max-width:190px; font-size:9px; letter-spacing:.5px;
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+            #gold-block { grid-area:gold; padding:4px 8px; }
+            #gold-block > span:first-child { font-size:8px !important; letter-spacing:1px !important; }
+            #gold-value { font-size:16px; }
+            #gold-income { display:block; font-size:8px; line-height:1.1; white-space:nowrap; }
+            #time-controls { grid-area:time; justify-content:center; gap:10px; }
+            .time-btn { width:44px; height:42px; font-size:18px; border-radius:12px; }
+            #speed-label { display:none; }
+            #map-hint { top:calc(env(safe-area-inset-top, 0px) + 108px); font-size:11px;
+                max-width:calc(100vw - 100px); overflow:hidden; text-overflow:ellipsis; }
+            #map-controls { right:10px; top:auto; bottom:calc(102px + env(safe-area-inset-bottom, 0px)); transform:none; gap:7px; }
+            .map-control-btn { width:44px; height:44px; border-radius:13px; }
+
+            #dispatch-controls { left:10px; bottom:calc(12px + env(safe-area-inset-bottom, 0px));
+                width:min(48vw, 190px); min-width:0; padding:8px 9px; gap:5px; border-radius:14px; }
+            #dispatch-label { font-size:9px; letter-spacing:1px; }
+            #dispatch-row { gap:6px; }
+            #dispatch-input { width:0; min-width:0; padding:8px 4px; font-size:16px; }
+            #dispatch-all-btn { min-height:42px; padding:7px 9px; font-size:12px; border-radius:10px; }
+            #minimap-container { right:10px; bottom:calc(12px + env(safe-area-inset-bottom, 0px));
+                width:42vw; max-width:158px; padding:3px; border-radius:10px; }
+            #minimap-label { display:none; }
+            #minimap { display:block; width:100%; height:auto; aspect-ratio:2 / 1; }
+            #event-log { left:50%; bottom:calc(94px + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%);
+                width:min(54vw, 210px); gap:3px; }
+            .event-item { padding:4px 7px; font-size:10px; }
+            #node-tooltip { display:none !important; }
+
+            #province-panel { display:block; top:auto; right:0; bottom:0; left:0; width:100%;
+                max-height:min(72dvh, 600px); padding:22px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+                border:1px solid rgba(0,229,255,.22); border-bottom:0; border-radius:20px 20px 0 0;
+                transform:translateY(105%); transition:transform .24s ease; z-index:80; touch-action:pan-y; }
+            #province-panel::before { content:""; position:absolute; top:8px; left:50%; transform:translateX(-50%);
+                width:38px; height:4px; border-radius:4px; background:rgba(255,255,255,.25); }
+            #province-panel.open { transform:translateY(0); }
+            #close-panel-btn { top:14px; right:14px; width:42px; height:42px; font-size:18px; }
+            #p-title { font-size:17px; }
+            .stat-card { padding:10px 12px; }
+            .stat-value { font-size:22px; }
+            .btn { min-height:46px; font-size:15px; }
+            #recruit-input { min-height:44px; font-size:18px; }
+            .recruit-row { gap:6px; }
+            .recruit-row .btn { padding:8px !important; }
+            .overlay-box { width:calc(100vw - 36px); padding:28px 22px; }
+            .overlay-title { font-size:20px; }
+        }
+
+        @media (max-width: 380px) {
+            #title-block h1 { font-size:13px; }
+            #map-hint { max-width:calc(100vw - 82px); }
+            #dispatch-controls { width:46vw; }
+            #minimap-container { width:39vw; }
+            #event-log { width:48vw; }
+        }
+
+        @media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+            #top-bar { min-height:54px; height:54px; grid-template-columns:1fr auto auto;
+                grid-template-areas:"title time gold"; padding:env(safe-area-inset-top, 0px) 12px 4px; gap:8px; }
+            #title-block span { display:none; }
+            #title-block h1 { font-size:13px; }
+            #time-controls { gap:5px; }
+            .time-btn { width:40px; height:40px; }
+            #map-hint { top:calc(env(safe-area-inset-top, 0px) + 62px); }
+            #map-controls { right:10px; bottom:74px; }
+            #dispatch-controls { width:185px; bottom:10px; }
+            #minimap-container { width:145px; bottom:10px; }
+            #event-log { bottom:10px; width:200px; }
+            #province-panel { top:0; right:0; bottom:0; left:auto; width:min(330px,55vw); max-height:100dvh;
+                border:1px solid rgba(0,229,255,.22); border-radius:16px 0 0 16px;
+                transform:translateX(105%); padding-top:20px; }
+            #province-panel.open { transform:translateX(0); }
+            #province-panel::before { display:none; }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <script>
+        window.exactDispatchMode = 10;
+        window.gameSpeed = 1;
+
+        function setSpeed(s) {
+            window.gameSpeed = s;
+            document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+            const labels = {0:'⏸ PAUSED', 1:'▶ NORMAL', 2:'⏩ ×2'};
+            document.getElementById('speed-label').textContent = labels[s]||'';
+            const ids = {0:'btn-p',1:'btn-1',2:'btn-2'};
+            if (ids[s]) document.getElementById(ids[s]).classList.add('active');
+            if (window.gameScene) window.gameScene.tweens.timeScale = s;
+        }
+        function updateDispatch() {
+            const v = parseInt(document.getElementById('dispatch-input').value);
+            if (v>0) window.exactDispatchMode = v;
+            document.getElementById('dispatch-all-btn').classList.remove('active');
+        }
+        function setDispatchAll() {
+            window.exactDispatchMode = 'all';
+            document.getElementById('dispatch-all-btn').classList.add('active');
+        }
+        function closePanel() {
+            document.getElementById('province-panel').classList.remove('open');
+        }
+    </script>
+</head>
+<body>
+    <div id="scanlines"></div>
+    <div id="game-container"></div>
+
+    <!-- TOP BAR -->
+    <div id="top-bar">
+        <div id="title-block">
+            <h1>GLOBAL COMMAND</h1>
+            <span>★ Chiếm Thủ Đô → Kiếm Vàng → Mua Quân</span>
+        </div>
+        <div id="time-controls">
+            <button class="time-btn" id="btn-p" onclick="setSpeed(0)" title="Dừng">⏸</button>
+            <button class="time-btn active" id="btn-1" onclick="setSpeed(1)" title="Bình thường">▶</button>
+            <button class="time-btn" id="btn-2" onclick="setSpeed(2)" title="Nhanh x2">⏩</button>
+            <span id="speed-label">▶ NORMAL</span>
+        </div>
+        <div id="gold-block">
+            <span style="font-size:10px;color:#6a4d00;letter-spacing:2px">TREASURY</span>
+            <span id="gold-value">15 💰</span>
+            <span id="gold-income" style="color:#3a5a78">+0.2/s · 1 Thủ Đô</span>
+        </div>
+    </div>
+
+    <div id="map-hint">Kéo từ tỉnh xanh tới mục tiêu · Kéo nền để di chuyển · Cuộn để zoom</div>
+    <div id="map-controls" aria-label="Điều khiển bản đồ">
+        <button class="map-control-btn" type="button" aria-label="Phóng to bản đồ" onclick="window.gameScene?.zoomMap(1.25)">+</button>
+        <button class="map-control-btn" type="button" aria-label="Thu nhỏ bản đồ" onclick="window.gameScene?.zoomMap(0.8)">−</button>
+        <button class="map-control-btn" type="button" aria-label="Về thủ đô của bạn" onclick="window.gameScene?.focusPlayerCapital()">⌂</button>
+    </div>
+
+    <!-- PROVINCE PANEL -->
+    <div id="province-panel">
+        <button id="close-panel-btn" onclick="closePanel()">✕</button>
+        <div id="p-title">CITY NAME</div>
+        <div id="p-faction" style="color:#3a5a78">Phe: NEUTRAL</div>
+        <span id="p-type-badge">○ Tỉnh</span>
+
+        <div class="stat-grid">
+            <div class="stat-card">
+                <div class="stat-label">⚔ Quân số</div>
+                <div class="stat-value troops" id="p-units">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">👥 Dân số</div>
+                <div class="stat-value pop" id="p-pop">0</div>
+            </div>
+        </div>
+
+        <div id="training-block" style="display:none">
+            <div class="prog-label">⏳ Đang huấn luyện: <span id="training-count">0</span> lính</div>
+            <div class="prog-bar-bg"><div class="prog-bar-fill" id="training-bar"></div></div>
+        </div>
+
+        <div id="p-actions" style="display:none">
+            <div class="section-header">Tuyển Quân</div>
+            <div class="recruit-row">
+                <input type="number" id="recruit-input" value="1" min="1" max="6" inputmode="numeric" aria-label="Số quân cần tuyển">
+                <button class="btn btn-red" style="width:auto;padding:8px 10px" onclick="window.gameScene.buyTroops('custom')">Tuyển</button>
+                <button class="btn btn-red" style="width:auto;padding:8px 10px" onclick="window.gameScene.buyTroops('max')">Tối đa</button>
+            </div>
+            <div id="recruit-hint" style="font-size:11px;color:#3a5a78;margin-top:4px;text-align:right"></div>
+
+            <div class="panel-divider"></div>
+            <div class="section-header">Thủ Đô</div>
+            <button class="btn btn-gold" id="btn-cap" onclick="window.gameScene.relocateCapital()">★ Dời Đô (60 Vàng)</button>
+
+            <div id="capital-income-info" style="display:none; margin-top:8px; padding:8px;
+                background:rgba(255,215,0,0.07); border-radius:6px; border:1px solid rgba(255,215,0,0.2);
+                font-size:12px; color:var(--gold); line-height:1.6;"></div>
+
+            <div style="margin-top:10px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px;font-size:11px;color:#3a5a78;line-height:1.7;">
+                <b style="color:var(--gold)">★ Thủ Đô</b> → Tạo 2 Vàng + 2 Dân mỗi 15 giây<br>
+                <b style="color:#8899aa">○ Tỉnh thường</b> → Tạo 1 Dân mỗi 15 giây<br>
+                <b style="color:var(--red)">Tuyển quân</b> → 8 Vàng + 3 Dân, huấn luyện 8 giây/lính<br>
+                <b style="color:var(--red)">Mất Thủ Đô = Mất tất cả!</b>
+            </div>
+        </div>
+
+        <div id="p-warning" style="display:none; color:#ff6b6b; font-size:13px; margin-top:12px; font-style:italic;">
+            🔒 Lãnh thổ của kẻ thù.
+        </div>
+    </div>
+
+    <!-- DISPATCH CONTROLS -->
+    <div id="dispatch-controls">
+        <div id="dispatch-label">Quân Xuất Trận</div>
+        <div id="dispatch-row">
+            <input type="number" id="dispatch-input" value="10" min="1" max="9999"
+                inputmode="numeric" aria-label="Số quân xuất trận"
+                onchange="updateDispatch()" oninput="updateDispatch()">
+            <button id="dispatch-all-btn" onclick="setDispatchAll()">TẤT CẢ</button>
+        </div>
+    </div>
+
+    <!-- MINIMAP -->
+    <div id="minimap-container">
+        <div id="minimap-label">WORLD MAP — 7 FACTIONS</div>
+        <canvas id="minimap" width="200" height="100"></canvas>
+    </div>
+
+    <!-- EVENT LOG -->
+    <div id="event-log"></div>
+    <div id="node-tooltip"></div>
+
+    <!-- OVERLAY SCREEN -->
+    <div id="overlay-screen">
+        <div class="overlay-box" id="overlay-box">
+            <div class="overlay-title" id="overlay-title">THỦ ĐÔ THẤT THỦ</div>
+            <div class="overlay-sub" id="overlay-sub">Đế chế của bạn đã sụp đổ.</div>
+            <button class="overlay-btn" onclick="location.reload()">CHƠI LẠI</button>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
