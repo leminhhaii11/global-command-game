@@ -283,17 +283,151 @@ class MainScene extends Phaser.Scene {
 
     // ─── Input ───────────────────────────────────────────────
     setupInput() {
-        // Fallback cho Safari/iOS: một số phiên bản không cập nhật worldX/worldY
-        // ổn định khi canvas đang pan/zoom; kiểm tra tap từ tọa độ DOM sau sự kiện Phaser.
         const canvas=this.game.canvas;
+        const toGamePoint=(clientX,clientY) => {
+            const rect=canvas.getBoundingClientRect();
+            return {
+                x:(clientX-rect.left)*(this.scale.width/rect.width),
+                y:(clientY-rect.top)*(this.scale.height/rect.height)
+            };
+        };
+        const toWorldPoint=(clientX,clientY) => {
+            const point=toGamePoint(clientX,clientY);
+            return this.cameras.main.getWorldPoint(point.x,point.y);
+        };
+
+        // Safari/iOS: nhận touch trực tiếp để không phụ thuộc vào việc Phaser
+        // đồng bộ tọa độ pointer/world sau khi canvas bị pan hoặc zoom.
+        if (this.isTouchDevice) {
+            const activeTouches=new Map();
+            let gesture=null;
+            let pinchDistance=0;
+            let pinchMidpoint=null;
+            const resetGesture=() => {
+                gesture=null;
+                pinchDistance=0;
+                pinchMidpoint=null;
+                this.dragState.on=false;
+                this.dragState.startNode=null;
+                this.isPanning=false;
+                this.dragGfx.clear();
+            };
+            const updateTouches=touches => {
+                activeTouches.clear();
+                Array.from(touches).forEach(touch=>activeTouches.set(touch.identifier,{x:touch.clientX,y:touch.clientY}));
+            };
+
+            canvas.addEventListener('touchstart', event => {
+                event.preventDefault();
+                updateTouches(event.touches);
+                document.getElementById('map-hint')?.classList.add('hidden');
+                if (activeTouches.size>=2) {
+                    gesture='pinch';
+                    this.pinchGesture=true;
+                    this.dragState.on=false;
+                    this.dragState.startNode=null;
+                    this.isPanning=false;
+                    const points=[...activeTouches.values()];
+                    pinchDistance=Phaser.Math.Distance.Between(points[0].x,points[0].y,points[1].x,points[1].y);
+                    pinchMidpoint={x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2};
+                    this.dragGfx.clear();
+                    return;
+                }
+                if (activeTouches.size!==1) return;
+                const touch=event.changedTouches[0];
+                const screen={x:touch.clientX,y:touch.clientY};
+                const world=toWorldPoint(touch.clientX,touch.clientY);
+                const node=this.nodeAt(world.x,world.y);
+                const startNode=node?.owner===1 ? node : null;
+                gesture={id:touch.identifier,start:screen,last:screen,startNode,moved:false};
+                this.dragState.startX=screen.x; this.dragState.startY=screen.y;
+                this.dragState.startNode=startNode;
+                this.dragState.on=false;
+                this.isPanning=!startNode;
+            },{passive:false,capture:true});
+
+            canvas.addEventListener('touchmove', event => {
+                event.preventDefault();
+                updateTouches(event.touches);
+                if (activeTouches.size>=2) {
+                    const points=[...activeTouches.values()];
+                    const nextDistance=Phaser.Math.Distance.Between(points[0].x,points[0].y,points[1].x,points[1].y);
+                    const nextMidpoint={x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2};
+                    if (pinchDistance>0 && nextDistance>0 && pinchMidpoint) {
+                        const before=toWorldPoint(pinchMidpoint.x,pinchMidpoint.y);
+                        this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom*(nextDistance/pinchDistance),0.22,2.2));
+                        const after=toWorldPoint(nextMidpoint.x,nextMidpoint.y);
+                        this.cameras.main.scrollX+=before.x-after.x;
+                        this.cameras.main.scrollY+=before.y-after.y;
+                        this.updateMobileLabels();
+                    }
+                    pinchDistance=nextDistance;
+                    pinchMidpoint=nextMidpoint;
+                    return;
+                }
+                if (!gesture || !event.touches.length) return;
+                const touch=Array.from(event.touches).find(t=>t.identifier===gesture.id);
+                if (!touch) return;
+                const dx=touch.clientX-gesture.start.x, dy=touch.clientY-gesture.start.y;
+                if (Math.hypot(dx,dy)>this.dragThreshold) {
+                    gesture.moved=true;
+                    if (gesture.startNode) {
+                        this.dragState.on=true;
+                        const p=toGamePoint(touch.clientX,touch.clientY);
+                        this.dragState.pX=p.x; this.dragState.pY=p.y;
+                    } else {
+                        const previous=gesture.last;
+                        this.cameras.main.scrollX-=(touch.clientX-previous.x)/this.cameras.main.zoom;
+                        this.cameras.main.scrollY-=(touch.clientY-previous.y)/this.cameras.main.zoom;
+                        this.updateMobileLabels();
+                    }
+                }
+                gesture.last={x:touch.clientX,y:touch.clientY};
+            },{passive:false,capture:true});
+
+            canvas.addEventListener('touchend', event => {
+                event.preventDefault();
+                const ended=event.changedTouches[0];
+                updateTouches(event.touches);
+                if (activeTouches.size>0) return;
+                this.pinchGesture=false;
+                if (!gesture || !ended || ended.identifier!==gesture.id) { resetGesture(); return; }
+
+                if (!gesture.moved) {
+                    const world=toWorldPoint(ended.clientX,ended.clientY);
+                    const node=this.nodeAt(world.x,world.y);
+                    if (node && this.selectedNode?.owner===1 && node!==this.selectedNode) {
+                        const source=this.selectedNode;
+                        this.dispatch(source,node);
+                        this.deselectNode();
+                    } else if (node) this.selectNode(node);
+                    else this.deselectNode();
+                } else if (gesture.startNode) {
+                    const world=toWorldPoint(ended.clientX,ended.clientY);
+                    const target=this.nodeAt(world.x,world.y);
+                    if (target && target!==gesture.startNode) this.dispatch(gesture.startNode,target);
+                }
+                resetGesture();
+            },{passive:false,capture:true});
+
+            canvas.addEventListener('touchcancel', event => {
+                updateTouches(event.touches);
+                this.pinchGesture=false;
+                resetGesture();
+            },{passive:false,capture:true});
+        }
+
+        // Fallback cho trình duyệt chuột: kiểm tra tap bằng tọa độ DOM sau sự kiện Phaser.
         const domPointers=new Set();
         const tapStarts=new Map();
         canvas.addEventListener('pointerdown', event => {
+            if (this.isTouchDevice) return;
             domPointers.add(event.pointerId);
             if (domPointers.size===1) tapStarts.set(event.pointerId,{x:event.clientX,y:event.clientY});
             else tapStarts.clear();
         }, true);
         canvas.addEventListener('pointerup', event => {
+            if (this.isTouchDevice) return;
             const start=tapStarts.get(event.pointerId);
             const wasMultiTouch=domPointers.size>1;
             tapStarts.delete(event.pointerId);
@@ -323,6 +457,7 @@ class MainScene extends Phaser.Scene {
         }, true);
 
         this.input.on('pointerdown', p => {
+            if (this.isTouchDevice) return;
             document.getElementById('map-hint')?.classList.add('hidden');
             const activePointers = this.input.pointers.filter(pointer => pointer.isDown);
             if (activePointers.length >= 2) {
@@ -345,6 +480,7 @@ class MainScene extends Phaser.Scene {
         });
 
         this.input.on('pointermove', p => {
+            if (this.isTouchDevice) return;
             const activePointers = this.input.pointers.filter(pointer => pointer.isDown);
             if (this.pinchGesture && activePointers.length >= 2) {
                 const [a, b] = activePointers;
@@ -376,6 +512,7 @@ class MainScene extends Phaser.Scene {
         });
 
         this.input.on('pointerup', p => {
+            if (this.isTouchDevice) return;
             if (this.pinchGesture) {
                 if (!this.input.pointers.some(pointer => pointer.isDown)) {
                     this.pinchGesture = false;
