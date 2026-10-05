@@ -299,7 +299,8 @@ class MainScene extends Phaser.Scene {
                 return;
             }
             this.dragState.startX=p.x; this.dragState.startY=p.y;
-            const node = this.nodeAt(p.worldX, p.worldY);
+            const worldPoint = this.cameras.main.getWorldPoint(p.x, p.y);
+            const node = this.nodeAt(worldPoint.x, worldPoint.y);
             if (node && node.owner===1) this.dragState.startNode=node;
             else this.isPanning=true;
         });
@@ -348,7 +349,8 @@ class MainScene extends Phaser.Scene {
             }
             const d = Phaser.Math.Distance.Between(this.dragState.startX,this.dragState.startY,p.x,p.y);
             if (d<this.dragThreshold) {
-                const node = this.nodeAt(p.worldX,p.worldY);
+                const worldPoint = this.cameras.main.getWorldPoint(p.x, p.y);
+                const node = this.nodeAt(worldPoint.x, worldPoint.y);
                 if (node && this.isTouchDevice && this.selectedNode &&
                     this.selectedNode.owner===1 && node!==this.selectedNode) {
                     const source = this.selectedNode;
@@ -357,7 +359,8 @@ class MainScene extends Phaser.Scene {
                 } else if (node) this.selectNode(node);
                 else this.deselectNode();
             } else if (this.dragState.on && this.dragState.startNode) {
-                const tgt = this.nodeAt(p.worldX,p.worldY);
+                const worldPoint = this.cameras.main.getWorldPoint(p.x, p.y);
+                const tgt = this.nodeAt(worldPoint.x, worldPoint.y);
                 if (tgt && tgt!==this.dragState.startNode) this.dispatch(this.dragState.startNode, tgt);
             }
             this.dragState.on=false; this.dragState.startNode=null; this.isPanning=false;
@@ -414,9 +417,15 @@ class MainScene extends Phaser.Scene {
     }
 
     nodeAt(wx, wy) {
-        for (const n of this.nodes)
-            if (Phaser.Math.Distance.Between(wx,wy,n.x,n.y) <= n.R+(this.isTouchDevice?30:18)) return n;
-        return null;
+        let nearest=null, nearestDistance=Infinity;
+        for (const n of this.nodes) {
+            const distance=Phaser.Math.Distance.Between(wx,wy,n.x,n.y);
+            if (distance <= n.R+(this.isTouchDevice?30:18) && distance < nearestDistance) {
+                nearest=n;
+                nearestDistance=distance;
+            }
+        }
+        return nearest;
     }
 
     // ─── Minimap ─────────────────────────────────────────────
