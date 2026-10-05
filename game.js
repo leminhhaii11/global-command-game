@@ -283,6 +283,45 @@ class MainScene extends Phaser.Scene {
 
     // ─── Input ───────────────────────────────────────────────
     setupInput() {
+        // Fallback cho Safari/iOS: một số phiên bản không cập nhật worldX/worldY
+        // ổn định khi canvas đang pan/zoom; kiểm tra tap từ tọa độ DOM sau sự kiện Phaser.
+        const canvas=this.game.canvas;
+        const domPointers=new Set();
+        const tapStarts=new Map();
+        canvas.addEventListener('pointerdown', event => {
+            domPointers.add(event.pointerId);
+            if (domPointers.size===1) tapStarts.set(event.pointerId,{x:event.clientX,y:event.clientY});
+            else tapStarts.clear();
+        }, true);
+        canvas.addEventListener('pointerup', event => {
+            const start=tapStarts.get(event.pointerId);
+            const wasMultiTouch=domPointers.size>1;
+            tapStarts.delete(event.pointerId);
+            domPointers.delete(event.pointerId);
+            if (!start || wasMultiTouch || this.pinchGesture ||
+                Phaser.Math.Distance.Between(start.x,start.y,event.clientX,event.clientY)>18) return;
+
+            const before=this.selectedNode;
+            window.setTimeout(() => {
+                // Nếu Phaser đã xử lý tap, không chạy lần thứ hai.
+                if (this.selectedNode!==before) return;
+                const rect=canvas.getBoundingClientRect();
+                const gameX=(event.clientX-rect.left)*(this.scale.width/rect.width);
+                const gameY=(event.clientY-rect.top)*(this.scale.height/rect.height);
+                const worldPoint=this.cameras.main.getWorldPoint(gameX,gameY);
+                const node=this.nodeAt(worldPoint.x,worldPoint.y);
+                if (node && before && before.owner===1 && node!==before) {
+                    this.dispatch(before,node);
+                    this.deselectNode();
+                } else if (node) this.selectNode(node);
+                else this.deselectNode();
+            },0);
+        });
+        canvas.addEventListener('pointercancel', event => {
+            tapStarts.delete(event.pointerId);
+            domPointers.delete(event.pointerId);
+        }, true);
+
         this.input.on('pointerdown', p => {
             document.getElementById('map-hint')?.classList.add('hidden');
             const activePointers = this.input.pointers.filter(pointer => pointer.isDown);
