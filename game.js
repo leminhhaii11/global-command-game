@@ -9,6 +9,7 @@ const ECO_TICK_MS        = 15000; // Kinh tế cập nhật mỗi 15 giây
 const AI_TICK_MS         = 24000; // AI cân nhắc lại chiến lược mỗi 24 giây
 const ARMY_MUSTER_MS     = 800;   // Thời gian gom quân thành một đạo quân
 const TRAIN_INTERVAL     = 8000;  // Một lính cần 8 giây huấn luyện
+const SAVE_KEY           = 'global-command-save-v1';
 const MOVE_SPEED         = 12;    // Hành quân chậm để tạo thời gian phản ứng
 const CAPITAL_GOLD_RATE  = 2;     // Vàng mỗi 15 giây cho mỗi Thủ Đô
 const PROVINCE_POP_RATE  = 1;     // Dân mỗi 15 giây tại tỉnh thường
@@ -124,13 +125,14 @@ class MainScene extends Phaser.Scene {
             (this.isTouchDevice && Math.min(window.innerWidth, window.innerHeight) <= 600);
         this.dragThreshold = this.isTouchDevice ? 14 : 8;
         document.getElementById('map-hint').textContent = this.isTouchDevice
-            ? 'Chọn tỉnh xanh → chọn đích · Kéo nền để di chuyển · Chụm để zoom'
-            : 'Kéo từ tỉnh xanh tới mục tiêu · Kéo nền để di chuyển · Cuộn để zoom';
+            ? 'Chạm tỉnh mình → chọn đích → xác nhận · Kéo để điều quân · Chụm để zoom'
+            : 'Chạm tỉnh để chọn · Chọn đích rồi xác nhận · Kéo để điều quân';
         this.cameras.main.setZoom(this.isCompactScreen ? 0.42 : 0.35);
 
         this.nodes       = [];
         this.activeUnits = [];
         this.selectedNode = null;
+        this.pendingTarget = null;
         this.isPanning   = false;
         this.dragState   = { on: false, startX:0, startY:0, startNode:null, pX:0, pY:0 };
         this.pinchGesture = false;
@@ -138,6 +140,7 @@ class MainScene extends Phaser.Scene {
         this.input.addPointer(2);
         this.ecoTimer    = 0;
         this.aiTimer     = 0;
+        this.saveElapsed = 0;
 
         // Vàng khởi đầu — ít, phải cố gắng kiếm
         this.gold = { 1:15, 2:15, 3:15, 4:15, 5:15, 6:15, 7:15 };
@@ -157,14 +160,16 @@ class MainScene extends Phaser.Scene {
         this.setupInput();
         this.setupMinimap();
 
-        // Camera intro
-        const hanoi = this.nodes.find(n => n.name === 'HANOI');
-        this.time.delayedCall(400, () => {
-            this.cameras.main.pan(hanoi.x, hanoi.y, 2000, 'Sine.easeInOut');
-            this.cameras.main.zoomTo(this.isCompactScreen ? 0.72 : 1.1, 2000);
-        });
-
-        this.logEvent('⚔ Cuộc chiến thế giới bắt đầu! Chiếm Thủ Đô để có Vàng.', 'gold');
+        const restored=this.loadGame();
+        if (!restored) {
+            const hanoi = this.nodes.find(n => n.name === 'HANOI');
+            this.time.delayedCall(400, () => {
+                this.cameras.main.pan(hanoi.x, hanoi.y, 2000, 'Sine.easeInOut');
+                this.cameras.main.zoomTo(this.isCompactScreen ? 0.72 : 1.1, 2000);
+            });
+            this.logEvent('⚔ Cuộc chiến thế giới bắt đầu! Chiếm Thủ Đô để có Vàng.', 'gold');
+        } else this.logEvent('💾 Đã khôi phục ván chơi đã lưu.', 'gold');
+        window.addEventListener('pagehide',()=>{ if (!this.skipSave) this.saveGame(false); });
     }
 
     // ─── Map ─────────────────────────────────────────────────
@@ -396,11 +401,7 @@ class MainScene extends Phaser.Scene {
                 if (!gesture.moved) {
                     const world=toWorldPoint(ended.clientX,ended.clientY);
                     const node=this.nodeAt(world.x,world.y);
-                    if (node && this.selectedNode?.owner===1 && node!==this.selectedNode) {
-                        const source=this.selectedNode;
-                        this.dispatch(source,node);
-                        this.deselectNode();
-                    } else if (node) this.selectNode(node);
+                    if (node) this.handleNodeTap(node);
                     else this.deselectNode();
                 } else if (gesture.startNode) {
                     const world=toWorldPoint(ended.clientX,ended.clientY);
@@ -444,10 +445,7 @@ class MainScene extends Phaser.Scene {
                 const gameY=(event.clientY-rect.top)*(this.scale.height/rect.height);
                 const worldPoint=this.cameras.main.getWorldPoint(gameX,gameY);
                 const node=this.nodeAt(worldPoint.x,worldPoint.y);
-                if (node && before && before.owner===1 && node!==before) {
-                    this.dispatch(before,node);
-                    this.deselectNode();
-                } else if (node) this.selectNode(node);
+                if (node) this.handleNodeTap(node);
                 else this.deselectNode();
             },0);
         });
@@ -527,12 +525,7 @@ class MainScene extends Phaser.Scene {
             if (d<this.dragThreshold) {
                 const worldPoint = this.cameras.main.getWorldPoint(p.x, p.y);
                 const node = this.nodeAt(worldPoint.x, worldPoint.y);
-                if (node && this.isTouchDevice && this.selectedNode &&
-                    this.selectedNode.owner===1 && node!==this.selectedNode) {
-                    const source = this.selectedNode;
-                    this.dispatch(source, node);
-                    this.deselectNode();
-                } else if (node) this.selectNode(node);
+                if (node) this.handleNodeTap(node);
                 else this.deselectNode();
             } else if (this.dragState.on && this.dragState.startNode) {
                 const worldPoint = this.cameras.main.getWorldPoint(p.x, p.y);
@@ -665,6 +658,8 @@ class MainScene extends Phaser.Scene {
     // ─── Select ──────────────────────────────────────────────
     selectNode(node) {
         if (this.selectedNode) this.selectedNode.sel.setVisible(false);
+        if (this.pendingTarget) this.pendingTarget.sel.setVisible(false);
+        this.pendingTarget=null;
         this.selectedNode=node;
         node.sel.setVisible(true); node.sel.setStrokeStyle(2.5,0xffffff,0.9);
         this.updateMobileLabels();
@@ -673,8 +668,29 @@ class MainScene extends Phaser.Scene {
         setTimeout(()=>panel.classList.add('open'),10);
         this.refreshPanel();
     }
+    handleNodeTap(node) {
+        if (this.selectedNode?.owner===1 && node!==this.selectedNode) {
+            if (this.pendingTarget) this.pendingTarget.sel.setVisible(false);
+            this.pendingTarget=node;
+            node.sel.setVisible(true);
+            node.sel.setStrokeStyle(2.5,0x00e5ff,0.95);
+            this.refreshPanel();
+            return;
+        }
+        this.selectNode(node);
+    }
+    confirmDispatch() {
+        if (!this.selectedNode || this.selectedNode.owner!==1 || !this.pendingTarget) return;
+        const target=this.pendingTarget;
+        this.dispatch(this.selectedNode,target);
+        this.pendingTarget.sel.setVisible(false);
+        this.pendingTarget=null;
+        this.refreshPanel();
+    }
     deselectNode() {
         if (this.selectedNode) this.selectedNode.sel.setVisible(false);
+        if (this.pendingTarget) this.pendingTarget.sel.setVisible(false);
+        this.pendingTarget=null;
         this.selectedNode=null;
         this.updateMobileLabels();
         document.getElementById('province-panel').classList.remove('open');
@@ -692,6 +708,16 @@ class MainScene extends Phaser.Scene {
 
         document.getElementById('p-units').textContent=Math.floor(n.units);
         document.getElementById('p-pop').textContent=`${Math.floor(n.pop)} / ${n.maxPop}`;
+        const targetPreview=document.getElementById('target-preview');
+        const confirmButton=document.getElementById('confirm-dispatch-btn');
+        if (this.pendingTarget && n.owner===1) {
+            targetPreview.style.display='block';
+            document.getElementById('target-name').textContent=`${this.pendingTarget.name} · ${Math.floor(this.pendingTarget.units)} quân`;
+            confirmButton.style.display='block';
+        } else {
+            targetPreview.style.display='none';
+            confirmButton.style.display='none';
+        }
 
         // Training bar
         const tb=document.getElementById('training-block');
@@ -881,10 +907,120 @@ class MainScene extends Phaser.Scene {
         }
     }
 
+    saveGame(showNotice=true) {
+        try {
+            const nodeName=n=>n?.name||null;
+            const snapshot={
+                version:1, savedAt:Date.now(),
+                gold:this.gold, alive:[...this.alive], ecoTimer:this.ecoTimer, aiTimer:this.aiTimer,
+                exactDispatchMode:window.exactDispatchMode, gameSpeed:window.gameSpeed,
+                selectedNode:nodeName(this.selectedNode), pendingTarget:nodeName(this.pendingTarget),
+                camera:{scrollX:this.cameras.main.scrollX,scrollY:this.cameras.main.scrollY,zoom:this.cameras.main.zoom},
+                nodes:this.nodes.map(n=>({
+                    name:n.name,owner:n.owner,type:n.type,units:n.units,pop:n.pop,
+                    trainingQueue:n.trainingQueue,trainingTimer:n.trainingTimer,trainingMax:n.trainingMax,
+                    dispatchTimer:n.dispatchTimer,pendingOrders:n.pendingOrders,
+                    dispatchQueue:n.dispatchQueue.map(order=>({target:nodeName(order.target),count:order.count}))
+                })),
+                activeUnits:this.activeUnits.map(u=>({
+                    x:u.x,y:u.y,target:nodeName(u.target),owner:u.owner,count:u.count,from:nodeName(u.from)
+                }))
+            };
+            localStorage.setItem(SAVE_KEY,JSON.stringify(snapshot));
+            const status=document.getElementById('save-status');
+            if (status) status.textContent='Đã lưu';
+            if (showNotice) this.logEvent('💾 Đã lưu ván chơi trên thiết bị này.', 'gold');
+            return true;
+        } catch (error) {
+            const status=document.getElementById('save-status');
+            if (status) status.textContent='Lưu lỗi';
+            if (showNotice) this.logEvent('Không thể lưu ván chơi trên trình duyệt này.', 'red');
+            return false;
+        }
+    }
+
+    loadGame() {
+        try {
+            const raw=localStorage.getItem(SAVE_KEY);
+            if (!raw) return false;
+            const data=JSON.parse(raw);
+            if (data.version!==1 || !Array.isArray(data.nodes) || !Array.isArray(data.alive)) return false;
+            const byName=new Map(this.nodes.map(n=>[n.name,n]));
+            const savedByName=new Map(data.nodes.map(n=>[n.name,n]));
+            if (this.nodes.some(n=>!savedByName.has(n.name))) return false;
+
+            Object.assign(this.gold,data.gold||{});
+            this.alive=new Set(data.alive);
+            this.ecoTimer=Number(data.ecoTimer)||0;
+            this.aiTimer=Number(data.aiTimer)||0;
+            window.exactDispatchMode=data.exactDispatchMode??10;
+            if (document.getElementById('dispatch-input')) document.getElementById('dispatch-input').value=window.exactDispatchMode==='all'?'10':window.exactDispatchMode;
+            if (window.exactDispatchMode==='all') document.getElementById('dispatch-all-btn').classList.add('active');
+
+            this.nodes.forEach(n=>{
+                const saved=savedByName.get(n.name);
+                n.owner=saved.owner; n.type=saved.type; n.units=saved.units; n.pop=saved.pop;
+                n.trainingQueue=saved.trainingQueue||0; n.trainingTimer=saved.trainingTimer||0; n.trainingMax=saved.trainingMax||0;
+                n.dispatchTimer=saved.dispatchTimer||0; n.pendingOrders=saved.pendingOrders||0;
+                n.dispatchQueue=(saved.dispatchQueue||[]).map(order=>({target:byName.get(order.target),count:order.count})).filter(order=>order.target&&order.count>0);
+                n.fill.setFillStyle(FACTIONS[n.owner].color);
+                n.pulse.setFillStyle(FACTIONS[n.owner].color);
+                n.pulse.setStrokeStyle(n.type==='capital'?3:1.5,FACTIONS[n.owner].color,n.type==='capital'?0.5:0.4);
+                this.updateNodeVisuals(n);
+            });
+
+            this.activeUnits.forEach(u=>u.marker?.destroy());
+            this.activeUnits=[];
+            (data.activeUnits||[]).forEach(saved=>{
+                const target=byName.get(saved.target), from=byName.get(saved.from);
+                if (!target || !from || !(saved.count>0)) return;
+                const marker=this.createArmyMarker(saved.owner,saved.count,saved.x,saved.y);
+                this.activeUnits.push({x:saved.x,y:saved.y,target,owner:saved.owner,count:saved.count,from,marker});
+            });
+
+            if (data.camera) {
+                this.cameras.main.setZoom(Phaser.Math.Clamp(data.camera.zoom||0.72,0.22,2.2));
+                this.cameras.main.scrollX=data.camera.scrollX||0;
+                this.cameras.main.scrollY=data.camera.scrollY||0;
+            }
+            const selected=byName.get(data.selectedNode);
+            if (selected) this.selectNode(selected);
+            this.pendingTarget=byName.get(data.pendingTarget)||null;
+            if (this.pendingTarget) {
+                this.pendingTarget.sel.setVisible(true);
+                this.pendingTarget.sel.setStrokeStyle(2.5,0x00e5ff,0.95);
+            }
+            if (this.selectedNode) this.refreshPanel();
+            this.updateGoldUI();
+            setSpeed(data.gameSpeed===0?0:(data.gameSpeed===2?2:1));
+            if (!this.alive.has(1)) {
+                document.getElementById('overlay-title').textContent='💀 THỦ ĐÔ THẤT THỦ';
+                document.getElementById('overlay-sub').textContent='Đế chế của bạn đã sụp đổ.';
+                document.getElementById('overlay-box').classList.remove('win');
+                document.getElementById('overlay-screen').classList.add('show');
+            } else if (this.alive.size===1 && this.alive.has(1)) {
+                document.getElementById('overlay-title').textContent='🌍 THẾ GIỚI THỐNG NHẤT!';
+                document.getElementById('overlay-sub').textContent='Alliance đã chinh phục toàn bộ thế giới!';
+                document.getElementById('overlay-box').classList.add('win');
+                document.getElementById('overlay-screen').classList.add('show');
+            }
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    startNewGame() {
+        if (!window.confirm('Tạo ván mới? Ván hiện tại đã tự lưu và sẽ bị xóa trên thiết bị này.')) return;
+        this.skipSave=true;
+        try { localStorage.removeItem(SAVE_KEY); } catch (error) {}
+        location.reload();
+    }
+
     // ─── One visible marker per marching army ────────────────
-    spawnArmy(from, to, count) {
-        const color=FACTIONS[from.owner].color;
-        const radius=Math.min(54, 12+Math.sqrt(count)*3);
+    createArmyMarker(owner,count,x,y) {
+        const color=FACTIONS[owner].color;
+        const radius=Math.min(54,12+Math.sqrt(count)*3);
         const halo=this.add.circle(0,0,radius+5,color,0.14).setStrokeStyle(2,color,0.8);
         const core=this.add.circle(0,0,radius,color,0.94).setStrokeStyle(1.5,0xffffff,0.6);
         const fontSize=Math.round(Math.min(18,Math.max(11,radius*0.78)));
@@ -892,8 +1028,12 @@ class MainScene extends Phaser.Scene {
             fontFamily:'Orbitron',fontSize:`${fontSize}px`,fontStyle:'bold',color:'#ffffff',
             stroke:'#061321',strokeThickness:3
         }).setOrigin(0.5);
-        const marker=this.add.container(from.x,from.y,[halo,core,countText]).setDepth(40);
+        const marker=this.add.container(x,y,[halo,core,countText]).setDepth(40);
         marker.setSize((radius+5)*2,(radius+5)*2);
+        return marker;
+    }
+    spawnArmy(from, to, count) {
+        const marker=this.createArmyMarker(from.owner,count,from.x,from.y);
         this.activeUnits.push({ x:from.x, y:from.y, target:to, owner:from.owner, count, from, marker });
     }
 
@@ -1000,6 +1140,13 @@ class MainScene extends Phaser.Scene {
 
     // ─── Update loop ─────────────────────────────────────────
     update(time, delta) {
+        if (!this.skipSave) {
+            this.saveElapsed+=delta;
+            if (this.saveElapsed>=5000) {
+                this.saveElapsed%=5000;
+                this.saveGame(false);
+            }
+        }
         const speed=window.gameSpeed||0;
 
         // Vẽ đường kéo thả

@@ -49,6 +49,12 @@
         #gold-value { font-family:'Orbitron',sans-serif; font-size:20px; color:var(--gold);
             text-shadow:0 0 8px var(--gold); line-height:1; }
         #gold-income { font-size:11px; }
+        .game-actions { display:flex; align-items:center; gap:6px; }
+        .game-action-btn { min-height:34px; padding:5px 10px; border:1px solid rgba(0,229,255,.3);
+            border-radius:8px; background:rgba(0,229,255,.06); color:var(--cyan);
+            font-family:'Rajdhani',sans-serif; font-size:13px; font-weight:bold; cursor:pointer; }
+        .game-action-btn.new-game { color:#ffb9c8; border-color:rgba(255,34,85,.35); background:rgba(255,34,85,.06); }
+        #save-status { min-width:44px; color:#7b9bb0; font-size:10px; text-align:center; }
 
         /* PROVINCE PANEL */
         #province-panel { position:fixed; top:66px; right:0; width:290px; z-index:40;
@@ -171,7 +177,7 @@
         @media (max-width: 700px) {
             body, html { height:100%; height:100dvh; min-height:0; }
             #top-bar { height:auto; min-height:100px; display:grid; grid-template-columns:minmax(0,1fr) auto;
-                grid-template-areas:"title gold" "time time"; gap:5px 8px; align-content:center;
+                grid-template-areas:"title gold" "time time" "actions actions"; gap:5px 8px; align-content:center;
                 padding:calc(env(safe-area-inset-top, 0px) + 7px) 12px 8px;
                 background:linear-gradient(180deg,rgba(2,13,28,.98),rgba(2,13,28,.88)); }
             #title-block { grid-area:title; min-width:0; }
@@ -183,9 +189,12 @@
             #gold-value { font-size:16px; }
             #gold-income { display:block; font-size:8px; line-height:1.1; white-space:nowrap; }
             #time-controls { grid-area:time; justify-content:center; gap:10px; }
+            .game-actions { grid-area:actions; justify-content:center; }
+            .game-action-btn { min-height:34px; min-width:112px; font-size:13px; }
+            #save-status { min-width:52px; font-size:10px; }
             .time-btn { width:44px; height:42px; font-size:18px; border-radius:12px; }
             #speed-label { display:none; }
-            #map-hint { top:calc(env(safe-area-inset-top, 0px) + 108px); font-size:11px;
+            #map-hint { top:calc(env(safe-area-inset-top, 0px) + 148px); font-size:11px;
                 max-width:calc(100vw - 100px); overflow:hidden; text-overflow:ellipsis; }
             #map-controls { right:10px; top:auto; bottom:calc(102px + env(safe-area-inset-bottom, 0px)); transform:none; gap:7px; }
             .map-control-btn { width:44px; height:44px; border-radius:13px; }
@@ -239,7 +248,10 @@
             #title-block h1 { font-size:13px; }
             #time-controls { gap:5px; }
             .time-btn { width:40px; height:40px; }
-            #map-hint { top:calc(env(safe-area-inset-top, 0px) + 62px); }
+            .game-actions { position:fixed; right:10px; top:calc(env(safe-area-inset-top, 0px) + 58px); z-index:55; }
+            .game-action-btn { min-height:30px; min-width:0; padding:4px 7px; font-size:11px; }
+            #save-status { display:none; }
+            #map-hint { top:calc(env(safe-area-inset-top, 0px) + 92px); }
             #map-controls { right:10px; bottom:74px; }
             #dispatch-controls { width:185px; bottom:10px; }
             #minimap-container { width:145px; bottom:10px; }
@@ -255,6 +267,8 @@
     <script>
         window.exactDispatchMode = 10;
         window.gameSpeed = 1;
+        function saveGameNow() { window.gameScene?.saveGame(true); }
+        function createNewGame() { window.gameScene?.startNewGame(); }
 
         function setSpeed(s) {
             window.gameSpeed = s;
@@ -295,6 +309,11 @@
             <button class="time-btn" id="btn-2" onclick="setSpeed(2)" title="Nhanh x2">⏩</button>
             <span id="speed-label">▶ NORMAL</span>
         </div>
+        <div class="game-actions" aria-label="Lưu và tạo ván">
+            <button class="game-action-btn" type="button" onclick="saveGameNow()" aria-label="Lưu ván chơi">💾 Lưu ván</button>
+            <span id="save-status" aria-live="polite">Tự lưu bật</span>
+            <button class="game-action-btn new-game" type="button" onclick="createNewGame()" aria-label="Tạo ván mới">＋ Ván mới</button>
+        </div>
         <div id="gold-block">
             <span style="font-size:10px;color:#6a4d00;letter-spacing:2px">TREASURY</span>
             <span id="gold-value">15 💰</span>
@@ -302,7 +321,7 @@
         </div>
     </div>
 
-    <div id="map-hint">Kéo từ tỉnh xanh tới mục tiêu · Kéo nền để di chuyển · Cuộn để zoom</div>
+    <div id="map-hint">Chạm tỉnh mình → chọn đích → xác nhận · Kéo để điều quân</div>
     <div id="map-controls" aria-label="Điều khiển bản đồ">
         <button class="map-control-btn" type="button" aria-label="Phóng to bản đồ" onclick="window.gameScene?.zoomMap(1.25)">+</button>
         <button class="map-control-btn" type="button" aria-label="Thu nhỏ bản đồ" onclick="window.gameScene?.zoomMap(0.8)">−</button>
@@ -326,6 +345,11 @@
                 <div class="stat-value pop" id="p-pop">0</div>
             </div>
         </div>
+
+        <div id="target-preview" style="display:none;margin:8px 0;padding:9px 10px;border:1px solid rgba(0,229,255,.28);border-radius:8px;background:rgba(0,229,255,.06);font-size:13px;color:#9bb2c5">
+            Đích đã chọn: <strong id="target-name" style="color:var(--cyan)"></strong>
+        </div>
+        <button class="btn btn-red" id="confirm-dispatch-btn" style="display:none" onclick="window.gameScene.confirmDispatch()">Xác nhận điều quân</button>
 
         <div id="training-block" style="display:none">
             <div class="prog-label">⏳ Đang huấn luyện: <span id="training-count">0</span> lính</div>
@@ -388,10 +412,10 @@
         <div class="overlay-box" id="overlay-box">
             <div class="overlay-title" id="overlay-title">THỦ ĐÔ THẤT THỦ</div>
             <div class="overlay-sub" id="overlay-sub">Đế chế của bạn đã sụp đổ.</div>
-            <button class="overlay-btn" onclick="location.reload()">CHƠI LẠI</button>
+            <button class="overlay-btn" onclick="createNewGame()">CHƠI LẠI</button>
         </div>
     </div>
 
-    <script src="game.js?v=ios-touch-2"></script>
+    <script src="game.js?v=save-and-confirm-1"></script>
 </body>
 </html>
